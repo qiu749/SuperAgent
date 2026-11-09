@@ -1,0 +1,49 @@
+{
+  "name": "weagent",
+  "version": "0.1.0",
+  "description": "企业微信常驻 Personal Agent（Pi Durable + Draft 审批 + Mem0 + DeepSeek Super-agent 架构）",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "dev": "node --experimental-transform-types --watch src/main.ts",
+    "start": "node --experimental-transform-types src/main.ts",
+    "cli": "node --experimental-transform-types src/cli.ts",
+    "feishu:setup": "node --experimental-transform-types src/feishu/setup.ts",
+    "spike:crash": "node --experimental-transform-types examples/spike.ts crash-a; node --experimental-transform-types examples/spike.ts crash-b",
+    "spike:approval": "node --experimental-transform-types examples/spike.ts appr-a && node --experimental-transform-types examples/spike.ts appr-b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "probe:codemode": "node --experimental-transform-types examples/codemode-probe.ts",
+    "probe:browser": "node --experimental-transform-types examples/browser-probe.ts"
+  },
+  "dependencies": {
+    "@computer-use/nut-js": "^4.2.0",
+    "@earendil-works/chord": "1.5.0",
+    "@earendil-works/pi-ai": "1.5.0",
+    "@earendil-works/pi-durable": "1.5.0",
+    "@earendil-works/pi-mcp": "1.5.0",
+    "@earendil-works/pi-schema": "1.5.0",
+    "@hono/node-server": "^1.14.0",
+    "@larksuiteoapi/node-sdk": "^1.76.0",
+    "cron-parser": "^5.0.0",
+    "dockerode": "^5.0.1",
+    "fast-xml-parser": "^5.0.0",
+    "hono": "^4.7.0",
+    "js-yaml": "^5.5.0",
+    "kysely": "^0.28.0",
+    "mem0ai": "3.3.1",
+    "pino": "^9.6.0",
+    "playwright-core": "^1.65.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^4.0.2",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.13.0",
+    "typescript": "^5.8.0",
+    "vitest": "^4.1.12"
+  }
+}

@@ -1,0 +1,13 @@
+node_modules/
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.log
+state.json
+.env
+dist/
+mcp.yaml
+
+# 内部工作区工件
+.zcode/

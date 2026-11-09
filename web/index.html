@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>WeAgent 待办中心</title>
+<style>
+  :root {
+    --bg: #f7f7f8; --surface: #ffffff; --border: #ececf1;
+    --ink: #0d0d0d; --sub: #6e6e80; --faint: #8e8ea0;
+    --accent: #10a37f; --danger: #ef4146; --warn: #d97706;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { font: 15px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Helvetica Neue", sans-serif; background: var(--bg); color: var(--ink); -webkit-font-smoothing: antialiased; }
+
+  header { position: sticky; top: 0; z-index: 10; background: rgba(255,255,255,.86); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+  .head-inner { max-width: 760px; margin: 0 auto; padding: 14px 20px 0; }
+  .head-row { display: flex; align-items: baseline; justify-content: space-between; }
+  .brand { font-size: 16px; font-weight: 600; letter-spacing: .2px; }
+  .meta { color: var(--faint); font-size: 12.5px; }
+  .meta b { color: var(--sub); font-weight: 500; }
+  .tabs { display: flex; gap: 4px; margin-top: 10px; }
+  .tabs a { flex: 1; text-align: center; padding: 8px 0 10px; font-size: 14px; color: var(--sub); text-decoration: none; border-bottom: 2px solid transparent; cursor: pointer; }
+  .tabs a.on { color: var(--ink); font-weight: 600; border-bottom-color: var(--ink); }
+
+  .wrap { max-width: 760px; margin: 0 auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+
+  .section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+  .section > h3 { margin: 0; padding: 12px 16px; font-size: 13px; font-weight: 600; color: var(--sub); border-bottom: 1px solid var(--border); letter-spacing: .3px; }
+  .item { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .item:last-child { border-bottom: 0; }
+  .item-title { font-size: 15px; font-weight: 500; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .item-sub { color: var(--sub); font-size: 12.5px; margin-top: 2px; }
+  .item-body { margin-top: 8px; font-size: 14px; }
+
+  .pill { display: inline-block; font-size: 11px; line-height: 1; padding: 4px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--sub); background: var(--surface); vertical-align: 1px; }
+  .pill.ok { color: var(--accent); border-color: #bfe8db; }
+  .pill.warn { color: var(--warn); border-color: #f3ddb8; }
+  .pill.err { color: var(--danger); border-color: #f6cfcb; }
+
+  button { border: 1px solid var(--border); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 7px 14px; font-size: 13.5px; cursor: pointer; transition: background .12s; }
+  button:hover { background: #f4f4f5; }
+  button.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
+  button.primary:hover { background: #2c2c32; }
+  button.approve { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.approve:hover { background: #0d8c6d; }
+  button.danger { color: var(--danger); }
+  button.ghost { border-color: transparent; background: transparent; color: var(--sub); }
+  button.ghost:hover { background: #f4f4f5; color: var(--ink); }
+  .row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+
+  textarea, input[type=text] { width: 100%; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; }
+  textarea { min-height: 84px; resize: vertical; }
+  input[type=text] { font-family: inherit; }
+  details summary { cursor: pointer; color: var(--sub); font-size: 13px; }
+  details summary:hover { color: var(--ink); }
+  pre { white-space: pre-wrap; word-break: break-word; font: 12.5px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin: 10px 0 0; max-height: 320px; overflow: auto; }
+
+  .empty { text-align: center; color: var(--faint); padding: 56px 0; font-size: 14px; }
+  .none { color: var(--faint); font-size: 13px; text-align: center; padding: 18px 0; }
+  .muted { color: var(--sub); font-size: 12.5px; }
+  .kv { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; }
+  .kv .k { min-width: 0; }
+</style>
+</head>
+<body>
+<header>
+  <div class="head-inner">
+    <div class="head-row">
+      <div class="brand">WeAgent</div>
+      <div class="meta" id="hdrSub"></div>
+    </div>
+    <div class="tabs">
+      <a data-v="decide" class="on">拍板</a>
+      <a data-v="tasks">任务</a>
+      <a data-v="timemachine">时光机</a>
+      <a data-v="brain">记忆与知识</a>
+      <a data-v="rules">规则与成本</a>
+    </div>
+  </div>
+</header>
+<div class="wrap" id="view"></div>
+<script>
+const $ = (s) => document.querySelector(s);
+
+async function api(path, opts) {
+  const r = await fetch(path, { headers: { "content-type": "application/json" }, ...opts });
+  if (r.status === 401) { location.href = "/api/panel/auth"; throw new Error("unauthorized"); }
+  if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 120)}`);
+  return r.json();
+}
+
+let current = "decide";
+document.querySelectorAll(".tabs a").forEach((a) => a.addEventListener("click", () => render(a.dataset.v)));
+
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
+function empty(text) { return `<div class="empty">${esc(text)}</div>`; }
+function stagePill(s) {
+  const cls = s === "ready" || s === "dropped" ? "ok" : s === "failed" || s === "cancelled" ? "err" : s === "working" || s === "queued" ? "" : "warn";
+  return `<span class="pill ${cls}">${esc(s)}</span>`;
+}
+
+async function render(v) {
+  current = v;
+  document.querySelectorAll(".tabs a").forEach((a) => a.classList.toggle("on", a.dataset.v === v));
+  const el = $("#view");
+  try {
+    if (v === "decide") await renderDecide(el);
+    if (v === "tasks") await renderTasks(el);
+    if (v === "timemachine") await renderTimeMachine(el);
+    if (v === "brain") await renderBrain(el);
+    if (v === "rules") await renderRules(el);
+  } catch (e) {
+    el.innerHTML = `<div class="section"><div class="item">加载失败：${esc(String(e))}</div></div>`;
+  }
+}
+
+// ---------- 拍板 ----------
+async function renderDecide(el) {
+  const o = await api("/api/panel/overview");
+  $("#hdrSub").innerHTML = `模式 <b>${esc(o.acceptMode)}</b> ｜ 槽位 <b>${o.workerSlots.used}/${o.workerSlots.capacity}</b>`;
+  if (o.pendingApprovals.length === 0 && o.pendingAsks.length === 0) {
+    el.innerHTML = empty("暂无待办事项");
+    return;
+  }
+  el.innerHTML =
+    (o.pendingAsks.length ? `<div class="section"><h3>待回答的追问</h3>` + o.pendingAsks.map((k) => `
+      <div class="item">
+        <div class="item-title"><span class="pill warn">${esc(k.id)}</span>任务 #${k.taskId}</div>
+        <div class="item-body">${esc(k.question)}</div>
+        <div class="row">${(k.options || []).map((opt, i) => `<button class="primary" onclick="answerAsk('${k.id}',${i})">${esc(opt)}</button>`).join("")}</div>
+      </div>`).join("") + `</div>` : "")
+  + (o.pendingApprovals.length ? `<div class="section"><h3>待批准的动作草稿</h3>` + o.pendingApprovals.map((a) => `
+      <div class="item">
+        <div class="item-title"><span class="pill ${a.status === "pending_digest" ? "warn" : ""}">${a.status === "pending_digest" ? "摘要池" : "待批"}</span>${esc(a.id)}<span class="muted">· ${esc(a.taskTitle)}</span></div>
+        <div class="item-sub">${esc(a.actionType)} <span class="muted">@ ${esc(a.scopeKey)} · ${a.urgency === "digest" ? "早晚报" : "立即"}</span></div>
+        <div class="item-body">${esc(a.preview)}</div>
+        <details style="margin-top:8px"><summary>查看 / 编辑参数</summary><textarea id="pl-${a.id}">${esc(JSON.stringify(a.payload, null, 2))}</textarea></details>
+        <div class="row">
+          <button class="approve" onclick="decide('${a.id}','approve')">批准</button>
+          <button class="danger" onclick="decide('${a.id}','reject')">拒绝</button>
+        </div>
+      </div>`).join("") + `</div>` : "");
+}
+
+async function decide(id, action) {
+  const ta = $(`#pl-${id}`);
+  const body = { action };
+  if (ta && ta.value.trim()) {
+    try { body.payload = JSON.parse(ta.value); } catch { alert("参数不是合法 JSON"); return; }
+  }
+  const r = await api(`/api/panel/approvals/${id}/decide`, { method: "POST", body: JSON.stringify(body) });
+  alert(r.message || "已处理"); render("decide");
+}
+async function answerAsk(id, i) {
+  const r = await api(`/api/panel/asks/${id}/answer`, { method: "POST", body: JSON.stringify({ optionIndex: i }) });
+  alert(r.message || "已提交"); render("decide");
+}
+
+// ---------- 任务 ----------
+async function renderTasks(el) {
+  const tasks = await api("/api/panel/tasks");
+  if (!tasks.length) { el.innerHTML = empty("还没有任务"); return; }
+  el.innerHTML = `<div class="section"><h3>最近任务</h3>` + tasks.map((t) => `
+    <div class="item">
+      <div class="item-title">${stagePill(t.stage)}<span>#${t.id} ${esc(t.title)}</span></div>
+      ${t.latest_report ? `<div class="item-sub">${esc(t.latest_report.summary || "")}</div>` : ""}
+      <div class="row">
+        <button class="ghost" onclick="loadTrace(${t.id}, this)">查看轨迹</button>
+        ${["failed", "ready", "dropped"].includes(t.stage)
+          ? `<button onclick="retry(${t.id})">重试</button>`
+          : `<button class="danger" onclick="stopTask(${t.id})">停止</button>`}
+      </div>
+      <div id="tr-${t.id}"></div>
+    </div>`).join("") + `</div>`;
+}
+async function loadTrace(id, btn) {
+  const t = await api(`/api/panel/tasks/${id}/transcript`);
+  btn.outerHTML = "";
+  $(`#tr-${id}`).innerHTML = `<pre>${esc(t.lines.map((l) =>
+    l.role === "tool" ? `工具 ${l.tool} → ${l.text}` : l.role === "user" ? `用户 ${l.text}` : `助理 ${l.text}`
+  ).join("\n\n")) || "（无记录）"}</pre>`;
+}
+async function retry(id) { await api(`/api/panel/tasks/${id}/retry`, { method: "POST", body: "{}" }); render("tasks"); }
+async function stopTask(id) { if (!confirm(`停止任务 #${id}？`)) return; const r = await api(`/api/panel/tasks/${id}/stop`, { method: "POST", body: "{}" }); alert(r.message || "已停止"); render("tasks"); }
+
+// ---------- 轨迹时光机 (Trajectory Time-Machine & Fork Replay) ----------
+let activeTmTask = null;
+let tmSeq = 1;
+async function renderTimeMachine(el) {
+  const tasks = await api("/api/panel/tasks");
+  if (!tasks.length) { el.innerHTML = empty("暂无可回放的任务轨迹"); return; }
+  const tid = activeTmTask || tasks[0].id;
+  const bundle = await api(`/api/panel/tasks/${tid}/trajectory`);
+  if (tmSeq > bundle.nodes.length) tmSeq = bundle.nodes.length || 1;
+  el.innerHTML = `
+  <div class="section"><h3>轨迹时光机（选择任务回放或从任意节点分叉重跑）</h3>
+    <div class="item">
+      <div class="row" style="margin-top:0">
+        ${tasks.slice(0, 12).map((t) => `<button class="${t.id === tid ? "primary" : ""}" onclick="selectTmTask(${t.id})">#${t.id} ${esc(t.title.slice(0, 18))}</button>`).join("")}
+      </div>
+      <div class="item-sub" style="margin-top:8px">
+        节点数: <b>${bundle.totalNodes}</b> ｜ 累计成本: <b>$${bundle.totalCostUsd}</b> ｜ Tokens: <b>${bundle.totalPromptTokens + bundle.totalCompletionTokens}</b>
+        ${bundle.parentTaskId ? ` ｜ <span class="pill warn">分叉自 #${bundle.parentTaskId} @ 步骤 #${bundle.forkedAtSeq}</span>` : ""}
+      </div>
+    </div>
+  </div>
+  <div class="section"><h3>步进播放器（Step Scrubber 1..${bundle.nodes.length}）</h3>
+    <div class="item">
+      <input type="range" min="1" max="${Math.max(1, bundle.nodes.length)}" value="${tmSeq}" id="tmScrubber" style="width:100%" oninput="tmScrub(this.value)">
+      <div class="item-sub" style="margin-top:6px">当前步 <b id="tmScrubLabel">${tmSeq}</b> / ${bundle.nodes.length}</div>
+      <div id="tmFocus"></div>
+    </div>
+    ${bundle.nodes.length ? bundle.nodes.map((n) => `
+      <div class="item" id="tm-node-${tid}-${n.seq}">
+        <div class="item-title">
+          <span class="pill">${n.seq}</span>
+          <span class="pill ${n.kind === "approval_gate" ? "warn" : n.kind === "computer_frame" ? "ok" : ""}">${esc(n.kind)}</span>
+          <span>${esc(n.title)}</span>
+        </div>
+        ${n.screenshotUrl ? `<div style="margin-top:8px"><img src="${esc(n.screenshotUrl)}" style="max-width:100%;max-height:220px;border-radius:6px;border:1px solid var(--border)"></div>` : ""}
+        <details style="margin-top:6px"><summary>查看步骤详情 / 从第 ${n.seq} 步分叉重跑</summary>
+          <pre>${esc(JSON.stringify(n.detail, null, 2))}</pre>
+          <div class="row">
+            <input type="text" id="fk-${tid}-${n.seq}" placeholder="输入修正指令（从第 ${n.seq} 步分叉出新任务重跑）" style="flex:1">
+            <button class="primary" onclick="forkFromStep(${tid}, ${n.seq})">从此步分叉重跑</button>
+          </div>
+        </details>
+      </div>`).join("") : `<div class="none">尚无轨迹节点</div>`}
+  </div>`;
+  tmScrub(tmSeq);
+}
+function tmScrub(seq) {
+  tmSeq = Number(seq);
+  const label = $("#tmScrubLabel");
+  if (label) label.textContent = tmSeq;
+  const tid = activeTmTask;
+  const node = document.getElementById(`tm-node-${tid}-${tmSeq}`);
+  const focus = $("#tmFocus");
+  if (focus && node) {
+    const img = node.querySelector("img");
+    focus.innerHTML = img
+      ? `<div class="muted" style="margin-top:6px">第 ${tmSeq} 步截图帧：</div><img src="${img.src}" style="max-width:100%;max-height:260px;border-radius:6px;border:1px solid var(--border);margin-top:4px">`
+      : `<div class="muted" style="margin-top:6px">第 ${tmSeq} 步（无截图帧）：${esc(node.querySelector(".item-title span:last-child").textContent.slice(0, 80))}</div>`;
+  }
+  if (node) node.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+function selectTmTask(id) { activeTmTask = id; tmSeq = 1; render("timemachine"); }
+async function forkFromStep(taskId, seq) {
+  const input = $(`#fk-${taskId}-${seq}`);
+  const overridePrompt = input ? input.value.trim() : "";
+  if (!overridePrompt) { alert("请输入分叉修正指令"); return; }
+  const r = await api(`/api/panel/tasks/${taskId}/fork`, { method: "POST", body: JSON.stringify({ atSeq: seq, overridePrompt }) });
+  alert(`已从 #${taskId} 第 ${seq} 步分叉出新任务 #${r.newTaskId}`);
+  activeTmTask = r.newTaskId;
+  render("timemachine");
+}
+
+// ---------- 记忆与知识（Brain & KB） ----------
+async function renderBrain(el) {
+  const [m, tele, kbDocs] = await Promise.all([
+    api("/api/panel/memories"),
+    api("/api/panel/skills/telemetry").catch(() => ({ skills: [] })),
+    api("/api/panel/kb/docs").catch(() => ({ docs: [] })),
+  ]);
+  el.innerHTML = `
+  <div class="section"><h3>长期记忆</h3>
+    <div class="item"><div class="row" style="margin-top:0"><input type="text" id="memText" placeholder="手动新增一条记忆" style="flex:1"><button class="primary" onclick="addMem()">新增</button></div></div>
+    ${m.memories.length ? m.memories.map((x) => `
+      <div class="item"><div class="kv"><span class="k">${esc(x.memory)}</span><button class="danger" onclick="delMem('${x.id}')">删除</button></div></div>`).join("") : `<div class="none">暂无记忆</div>`}
+  </div>
+  <div class="section"><h3>学到的习惯</h3>
+    ${m.habits.length ? m.habits.map((h) => `<div class="item"><div class="item-title"><span class="pill">${esc(h.actionType)}</span></div><div class="item-body">${esc(h.rule)}</div></div>`).join("") : `<div class="none">修改审批意见后自动沉淀</div>`}
+  </div>
+  <div class="section"><h3>技能健康度（一次通过率排行）</h3>
+    ${tele.skills.length ? tele.skills.map((s) => `
+      <div class="item">
+        <div class="item-title">${esc(s.skillName)}
+          <span class="pill ${s.firstTryRate >= 0.8 ? "ok" : s.firstTryRate >= 0.5 ? "warn" : "err"}">一次通过 ${(s.firstTryRate * 100).toFixed(0)}%</span>
+          ${s.pinned ? `<span class="pill ok">置顶</span>` : ""}
+          ${s.needsRewrite ? `<span class="pill warn">待巡检修订</span>` : ""}
+        </div>
+        <div class="item-sub">调用 ${s.viewsCount} 次 ｜ 一次通过 ${s.firstTryApproveCount} ｜ 打回/修改 ${s.editOrRejectCount}${s.lastUsedAt ? ` ｜ 最近 ${new Date(s.lastUsedAt).toLocaleString("zh-CN", { hour12: false })}` : ""}</div>
+        <div class="item-body">${esc(s.description || "")}</div>
+        <div class="row"><button class="ghost" onclick="rollbackSkill('${esc(s.skillName)}')">一键回滚到上一次变更前</button></div>
+      </div>`).join("") : `<div class="none">技能被调用后这里会出现健康度排行</div>`}
+  </div>
+  <div class="section"><h3>本地知识库（Hybrid RAG）</h3>
+    <div class="item"><div class="row" style="margin-top:0"><input type="text" id="kbQuery" placeholder="在个人文档库中检索（BM25 + 语义 RRF 融合）" style="flex:1"><button class="primary" onclick="kbSearchGo()">检索</button></div><div id="kbHits"></div></div>
+    <div class="item">
+      <div class="muted">已入库文档（${kbDocs.docs.length}）</div>
+      ${kbDocs.docs.length ? kbDocs.docs.map((d) => `<div class="kv"><span class="k">${esc(d.title)}<span class="muted"> · ${d.chunk_count} 片段</span></span><span class="muted">${new Date(d.indexed_at).toLocaleDateString("zh-CN")}</span></div>`).join("") : `<div class="none">让 Worker 调 kb_ingest_file 入库，或在下方粘贴文档</div>`}
+      <details style="margin-top:8px"><summary>录入 / 更新文档</summary>
+        <input type="text" id="kbDocTitle" placeholder="文档标题">
+        <textarea id="kbDocContent" placeholder="粘贴 Markdown / TXT 正文"></textarea>
+        <div class="row"><button class="primary" onclick="kbAddDoc()">入库索引</button></div>
+      </details>
+    </div>
+  </div>
+  <div class="section"><h3>技能库</h3>
+    ${m.skills.length ? m.skills.map((s) => `<div class="item"><div class="item-title"><span class="pill ${s.status === "active" ? "ok" : ""}">${esc(s.status)}</span>${esc(s.slug)}</div><div class="item-sub">${esc(s.description)}</div></div>`).join("") : `<div class="none">任务复盘后自动沉淀</div>`}
+  </div>`;
+}
+async function addMem() { const t = $("#memText").value.trim(); if (!t) return; await api("/api/panel/memories", { method: "POST", body: JSON.stringify({ text: t }) }); render("brain"); }
+async function delMem(id) { await api(`/api/panel/memories/${id}`, { method: "DELETE" }); render("brain"); }
+async function rollbackSkill(name) {
+  if (!confirm(`把技能 ${name} 回滚到最近一次变更之前？`)) return;
+  const r = await api("/api/panel/skills/rollback", { method: "POST", body: JSON.stringify({ name }) });
+  alert(r.message || "已回滚"); render("brain");
+}
+async function kbSearchGo() {
+  const q = $("#kbQuery").value.trim();
+  const box = $("#kbHits");
+  if (!q) { box.innerHTML = ""; return; }
+  const r = await api(`/api/panel/kb/search?q=${encodeURIComponent(q)}`);
+  box.innerHTML = r.hits.length
+    ? r.hits.map((h) => `<div class="item-sub" style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px">《${esc(h.docTitle)}》 ${esc(h.headingPath || "正文")} <span class="pill">RRF ${h.rrfScore}</span><div class="item-body">${esc(h.content.slice(0, 200))}${h.content.length > 200 ? "…" : ""}</div></div>`).join("")
+    : `<div class="none">未命中相关内容</div>`;
+}
+async function kbAddDoc() {
+  const title = $("#kbDocTitle").value.trim();
+  const content = $("#kbDocContent").value;
+  if (!content.trim()) { alert("正文不能为空"); return; }
+  await api("/api/panel/kb/docs", { method: "POST", body: JSON.stringify({ title, content }) });
+  alert("已入库索引"); render("brain");
+}
+
+// ---------- 规则与成本 ----------
+const MODE_LABEL = { always_ask: "每次审批", digest: "进摘要", auto_notify: "自动执行" };
+const ROLE_LABEL = { router: "Router 分诊", worker_default: "Worker 主力", worker_reasoning: "Worker 推理", vision_cua: "视觉桌面", curator: "后台复盘" };
+async function renderRules(el) {
+  const [p, o, cost] = await Promise.all([
+    api("/api/panel/trust-policies"),
+    api("/api/panel/observe"),
+    api("/api/panel/cost/summary").catch(() => null),
+  ]);
+  const used = cost ? Math.min(100, (cost.todayCostUsd / cost.dailyCostLimitUsd) * 100) : 0;
+  const roleRows = cost ? Object.entries(cost.byRole).sort((a, b) => b[1].costUsd - a[1].costUsd) : [];
+  const totalRoleCost = roleRows.reduce((s, [, v]) => s + v.costUsd, 0) || 1;
+  el.innerHTML = `
+  <div class="section"><h3>成本与传感器（Ops & Cost）</h3>
+    <div class="item">
+      <div class="kv"><span class="k">今日预算消耗</span><span class="muted">$${cost ? cost.todayCostUsd.toFixed(2) : "0.00"} / $${cost ? cost.dailyCostLimitUsd.toFixed(2) : "—"}</span></div>
+      <div style="height:8px;background:var(--border);border-radius:999px;overflow:hidden;margin-top:4px">
+        <div style="height:100%;width:${used}%;background:${used >= 100 ? "var(--danger)" : used >= 80 ? "var(--warn)" : "var(--accent)"}"></div>
+      </div>
+      <div class="muted" style="margin-top:6px">单任务熔断上限 $${cost ? cost.maxTaskCostUsd.toFixed(2) : "—"}；全天超限自动暂停后台复盘与非紧急传感器，仅保留你的直接指令。</div>
+    </div>
+    ${roleRows.length ? `
+    <div class="item">
+      <div class="muted">近 7 天各模型角色消耗</div>
+      ${roleRows.map(([role, v]) => `
+        <div class="kv" style="margin-top:6px">
+          <span class="k">${esc(ROLE_LABEL[role] || role)} <span class="muted">· ${v.calls} 次 · ${(v.promptTokens + v.completionTokens).toLocaleString()} tokens</span></span>
+          <span class="muted">$${v.costUsd.toFixed(4)}（${((v.costUsd / totalRoleCost) * 100).toFixed(0)}%）</span>
+        </div>`).join("")}
+    </div>` : `<div class="none">暂无模型调用记录</div>`}
+    ${cost && cost.recentSensors && cost.recentSensors.length ? `
+    <div class="item">
+      <div class="muted">主动传感器最近事件</div>
+      ${cost.recentSensors.slice(0, 8).map((s) => `
+        <div class="kv" style="margin-top:6px">
+          <span class="k">${esc(s.sensor_id)} <span class="muted">· ${esc(s.title.slice(0, 44))}</span></span>
+          <span class="pill ${s.urgency === "immediate" ? "warn" : ""}">${esc(s.urgency)}</span>
+        </div>`).join("")}
+    </div>` : `<div class="none">传感器暂无事件（webhook /calendar-prep 事件会在这里出现）</div>`}
+  </div>
+  <div class="section"><h3>入站模式</h3>
+    <div class="item">
+      <div class="row" style="margin-top:0">${["off", "observe", "auto"].map((m) => `<button class="${o.acceptMode === m ? "primary" : ""}" onclick="setMode('${m}')">${m}</button>`).join("")}</div>
+      <div class="muted" style="margin-top:8px">observe：外部事件只记录影子决策（would_accept），不真正执行。</div>
+      ${o.wouldAccept.length ? `<details style="margin-top:8px"><summary>影子日志（${o.wouldAccept.length}）</summary>
+        ${o.wouldAccept.map((w) => `<div class="kv"><span class="k muted">${esc(w.text.slice(0, 50))}</span>${w.alreadyAccepted ? `<span class="pill ok">已建</span>` : `<button onclick="promote('${w.triggerId}')">补建任务</button>`}</div>`).join("")}
+      </details>` : `<div class="none">暂无影子决策</div>`}
+    </div>
+  </div>
+  <div class="section"><h3>自动放权策略</h3>
+    ${p.length ? p.map((x) => `
+      <div class="item">
+        <div class="item-title">${esc(x.action_type)}<span class="muted">@ ${esc(x.scope_key)}</span></div>
+        <div class="item-sub">已连续批准 ${x.consecutive_approvals} 次</div>
+        <div class="row">${["always_ask", "digest", "auto_notify"].map((m) => `<button class="${x.mode === m ? "primary" : ""}" onclick="setPolicy('${esc(x.id)}','${m}')">${MODE_LABEL[m]}</button>`).join("")}</div>
+      </div>`).join("") : `<div class="none">连续批准同一类动作后，会在这里出现升级建议</div>`}
+  </div>`;
+}
+async function setMode(m) { await api("/api/panel/observe", { method: "PATCH", body: JSON.stringify({ acceptMode: m }) }); render("rules"); }
+async function setPolicy(id, mode) { await api("/api/panel/trust-policies", { method: "PATCH", body: JSON.stringify({ id, mode }) }); render("rules"); }
+async function promote(tid) { const r = await api(`/api/panel/observe/${tid}/promote`, { method: "POST", body: "{}" }); alert(r.message || "已建单"); render("rules"); }
+
+async function boot() {
+  try {
+    await fetch("/api/panel/overview");
+  } catch (e) {
+    $("#view").innerHTML = `<div class="section"><div class="item">无法连接后端（${esc(String(e))}）。请先启动服务：npm start / npm run dev</div></div>`;
+    return;
+  }
+  try { await render("decide"); } catch (e) { $("#view").innerHTML = `<div class="section"><div class="item">渲染失败：${esc(String(e))}</div></div>`; }
+}
+boot();
+</script>
+</body>
+</html>

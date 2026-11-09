@@ -1,0 +1,40 @@
+services:
+  weagent:
+    build:
+      context: .
+      dockerfile: sandbox/Dockerfile
+    image: weagent-sandbox:latest
+    container_name: weagent-sandbox
+    command: ["sleep", "infinity"]
+    mem_limit: 1g
+    cpus: 1
+    pids_limit: 256
+    network_mode: none
+    volumes:
+      - ./data/tasks:/data/tasks
+    profiles: ["sandbox"]
+
+  weagent-app:
+    image: node:24-slim
+    working_dir: /app
+    command: sh -c "npm install && node --experimental-strip-types src/main.ts"
+    environment:
+      - DATA_DIR=/data
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - WECOM_CORP_ID=${WECOM_CORP_ID:-}
+      - WECOM_SECRET=${WECOM_SECRET:-}
+      - WECOM_TOKEN=${WECOM_TOKEN:-}
+      - WECOM_AES_KEY=${WECOM_AES_KEY:-}
+      - WECOM_AGENT_ID=${WECOM_AGENT_ID:-1000002}
+      - ALLOWED_USERS=${ALLOWED_USERS:-}
+      - ACCEPT_MODE=${ACCEPT_MODE:-observe}
+      - PORT=8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - weagent-data:/data
+    # 沙箱需要访问宿主机 docker daemon（dockerode）
+    - /var/run/docker.sock:/var/run/docker.sock
+volumes:
+  weagent-data:

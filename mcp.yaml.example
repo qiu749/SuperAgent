@@ -1,0 +1,21 @@
+# WeAgent MCP 服务配置（复制为 mcp.yaml 启用）
+# 只读工具（readOnlyHint）直接执行；不可逆工具调用时自动生成审批草稿，批准后由宿主机执行。
+servers:
+  # 1. 本地文件系统 MCP
+  - name: filesystem
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/weagent-workspace"]
+    allow: ["read_file", "list_directory"]
+
+  # 2. 开源桌面控制 MCP（computer-use-mcp，基于 nut.js）
+  # 注意：macOS 需在「系统设置 -> 隐私与安全性 -> 辅助功能 / 屏幕录制」中勾选宿主终端
+  - name: computer-use
+    command: npx
+    args: ["-y", "computer-use-mcp"]
+    allow: ["screenshot", "cursor_position"]
+
+  # 3. HTTP 方式示例
+  # - name: search
+  #   url: https://mcp.example.com/mcp
+  #   headers:
+  #     Authorization: Bearer xxx
