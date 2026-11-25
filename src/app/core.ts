@@ -199,6 +199,7 @@ export class WeAgentCore implements WeAgentHost {
 	async stop(): Promise<void> {
 		this.outbox.close();
 		await this.browsers.closeAll().catch(() => {});
+		await this.mcp?.stop().catch(() => {});
 		await this.harness.close(BACKGROUND_CONTEXT);
 	}
 
@@ -715,7 +716,8 @@ export class WeAgentCore implements WeAgentHost {
 						this.extensions.mem0,
 						this.extensions.skills,
 						this.extensions.codemode,
-						this.extensions.computer,
+						// 接入外部 Computer Use MCP（如 open-computer-use）时，停用内置 legacy computer_action，避免模型混用两套桌面工具
+						this.mcp?.hasDesktopTools() ? null : this.extensions.computer,
 						this.extensions.knowledge,
 						this.extensions.subworker,
 						this.extensions.coding,
@@ -1836,6 +1838,49 @@ export class WeAgentCore implements WeAgentHost {
 
 	/** 当前持有宿主机桌面控制权的任务 ID（防两个任务同时操作鼠标与前台窗口互抢焦点）。 */
 	private activeDesktopTaskId: number | null = null;
+	private desktopLockTail: Promise<void> = Promise.resolve();
+
+	async withDesktopLock<T>(taskId: number | null, fn: () => Promise<T>): Promise<T> {
+		const prev = this.desktopLockTail;
+		let release!: () => void;
+		this.desktopLockTail = new Promise<void>((resolveLock) => {
+			release = resolveLock;
+		});
+		await prev;
+		if (taskId !== null) this.activeDesktopTaskId = taskId;
+		try {
+			return await fn();
+		} finally {
+			release();
+		}
+	}
+
+	async recordMcpDesktopFrame(input: {
+		conversationId: ConversationId;
+		toolName: string;
+		args: Record<string, unknown>;
+		imageBase64?: string;
+		mimeType?: string;
+	}): Promise<void> {
+		const wc = await this.workerContext(input.conversationId);
+		if (!wc) return;
+		let framePath: string | undefined;
+		if (input.imageBase64) {
+			const framesDir = resolve(this.cfg.dataDir, "trajectories", String(wc.taskId), "frames");
+			mkdirSync(framesDir, { recursive: true });
+			const ext = input.mimeType?.includes("jpeg") || input.mimeType?.includes("jpg") ? "jpg" : "png";
+			framePath = join(framesDir, `mcp_${input.toolName}_${Date.now()}.${ext}`);
+			writeFileSync(framePath, Buffer.from(input.imageBase64, "base64"));
+		}
+		await this.trajectory.recordEvent({
+			taskId: wc.taskId,
+			conversationId: String(input.conversationId),
+			kind: "computer_frame",
+			title: `MCP Computer Use: ${input.toolName}`,
+			screenshotPath: framePath,
+			detail: { tool: input.toolName, args: input.args },
+		});
+	}
 
 	async computerAction(
 		conversationId: ConversationId,
@@ -1844,6 +1889,15 @@ export class WeAgentCore implements WeAgentHost {
 	): Promise<{ observation: string; imageBase64?: string; details?: Record<string, unknown> }> {
 		const wc = await this.workerContext(conversationId);
 		if (!wc) throw new Error("当前会话不是任务 Worker 会话");
+		return this.withDesktopLock(wc.taskId, async () => this.runLegacyComputerAction(wc, conversationId, input, ctx));
+	}
+
+	private async runLegacyComputerAction(
+		wc: { taskId: number; userId: string; taskTitle: string; routingNote?: string; recentDialogue?: string; workspace: string },
+		conversationId: ConversationId,
+		input: ComputerActionInput,
+		ctx: Context,
+	): Promise<{ observation: string; imageBase64?: string; details?: Record<string, unknown> }> {
 		// 桌面焦点独占抢占：若存在其他旧任务正在后台争抢桌面，新任务（编号更大或刚被用户唤醒）抢占桌面并终止旧任务的后台轮次
 		if (this.activeDesktopTaskId !== null && this.activeDesktopTaskId !== wc.taskId) {
 			const prevTask = await getTask(this.db, this.activeDesktopTaskId);

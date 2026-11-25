@@ -82,11 +82,14 @@ export function panelRoutes(core: WeAgentCore): Hono<{ Variables: { panelUser: s
 		await next();
 	});
 
-	// ---------- Overview（置顶：等人拍板的事） ----------
+	// ---------- Overview（置顶：等人拍板的事 + 实时态势摘要） ----------
 
 	app.get("/api/panel/overview", async (c) => {
 		const userId = c.get("panelUser") as string;
-		const tasks = await core.db.selectFrom("tasks").where("user_id", "=", userId).selectAll().execute();
+		const [tasks, costSummary] = await Promise.all([
+			core.db.selectFrom("tasks").where("user_id", "=", userId).orderBy("updated_at", "desc").selectAll().execute(),
+			core.modelRouter.getSummary().catch(() => null),
+		]);
 		const taskIds = new Set(tasks.map((t) => t.id));
 		const approvals = (await core.db.selectFrom("approvals").where("status", "in", ["pending", "pending_digest"]).selectAll().execute())
 			.filter((a) => taskIds.has(a.task_id))
@@ -105,25 +108,56 @@ export function panelRoutes(core: WeAgentCore): Hono<{ Variables: { panelUser: s
 		const asks = (await core.db.selectFrom("asks").where("status", "=", "pending").selectAll().execute())
 			.filter((k) => taskIds.has(k.task_id))
 			.map((k) => ({ id: k.id, taskId: k.task_id, question: k.question, options: k.options ? (JSON.parse(k.options) as string[]) : [] }));
+		const activeCount = tasks.filter((t) => ["queued", "working", "waiting_approval", "waiting_user"].includes(t.stage)).length;
 		return c.json({
+			userId,
 			pendingApprovals: approvals,
 			pendingAsks: asks,
 			healthProblems: core.outbox.healthAlerts,
 			workerSlots: { ...core.slots.stats, used: core.slots.usedSlots, capacity: core.cfg.maxWorkers },
 			acceptMode: core.cfg.acceptMode,
 			digestCount: approvals.filter((a) => a.status === "pending_digest").length,
+			taskStats: { total: tasks.length, active: activeCount },
+			recentTasks: tasks.slice(0, 6).map((t) => ({
+				...t,
+				latest_report: t.latest_report ? JSON.parse(t.latest_report) : null,
+			})),
+			cost: costSummary
+				? {
+						todayCostUsd: costSummary.todayCostUsd,
+						dailyCostLimitUsd: costSummary.dailyCostLimitUsd,
+						maxTaskCostUsd: costSummary.maxTaskCostUsd,
+					}
+				: null,
+			mcpServers: core.mcp?.summary() ?? [],
+			messengerKind: core.messenger.kind,
 		});
 	});
 
-	// ---------- 拍板（可原地改 payload 后批准） ----------
+	// ---------- 面板快捷派单（直接给 WeAgent 发指令/任务） ----------
+
+	app.post("/api/panel/dispatch", async (c) => {
+		const userId = c.get("panelUser") as string;
+		const body = (await c.req.json().catch(() => ({}))) as { text?: string };
+		const text = body.text?.trim();
+		if (!text) return c.json({ error: "请输入指令内容" }, 400);
+		await core.dispatcher.onUserText(userId, text, `panel-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+		return c.json({ ok: true, message: "指令已派发，Router 正在处理" });
+	});
+
+	// ---------- 拍板（可原地改 payload 后批准，校验审批单归属） ----------
 
 	app.post("/api/panel/approvals/:id/decide", async (c) => {
+		const userId = c.get("panelUser") as string;
 		const id = c.req.param("id");
+		const row = await core.db.selectFrom("approvals").where("id", "=", id).selectAll().executeTakeFirst();
+		if (!row) return c.json({ error: "not_found" }, 404);
+		const ownerTask = await core.db.selectFrom("tasks").where("id", "=", row.task_id).where("user_id", "=", userId).selectAll().executeTakeFirst();
+		if (!ownerTask) return c.json({ error: "forbidden" }, 403);
+
 		const body = (await c.req.json().catch(() => ({}))) as { action?: string; payload?: Record<string, unknown> };
 		const action = body.action ?? "approve";
 		if (body.payload) {
-			const row = await core.db.selectFrom("approvals").where("id", "=", id).selectAll().executeTakeFirst();
-			if (!row) return c.json({ error: "not_found" }, 404);
 			if (!["pending", "pending_digest"].includes(row.status)) return c.json({ error: `已处理过（${row.status}）` }, 409);
 			await core.db.updateTable("approvals").set({ payload: JSON.stringify(body.payload) }).where("id", "=", id).execute();
 			// 面板上原地改过参数 = 一次修改（习惯提炼同样适用）
@@ -134,10 +168,21 @@ export function panelRoutes(core: WeAgentCore): Hono<{ Variables: { panelUser: s
 	});
 
 	app.post("/api/panel/approvals/batch-approve", async (c) => {
+		const userId = c.get("panelUser") as string;
 		const body = (await c.req.json().catch(() => ({}))) as { ids?: string[] };
 		const ids = body.ids ?? [];
 		const results: { id: string; message: string }[] = [];
 		for (const id of ids) {
+			const row = await core.db.selectFrom("approvals").where("id", "=", id).selectAll().executeTakeFirst();
+			if (!row) {
+				results.push({ id, message: "不存在" });
+				continue;
+			}
+			const ownerTask = await core.db.selectFrom("tasks").where("id", "=", row.task_id).where("user_id", "=", userId).selectAll().executeTakeFirst();
+			if (!ownerTask) {
+				results.push({ id, message: "无权操作" });
+				continue;
+			}
 			const r = await core.actions.onCardEvent(`ap:${id}:approve`);
 			results.push({ id, message: r.message });
 		}
@@ -181,10 +226,35 @@ export function panelRoutes(core: WeAgentCore): Hono<{ Variables: { panelUser: s
 		return c.json({ ok: true, message: `已停止任务 #${taskId}` });
 	});
 
-	/** 面板回答追问（复用 ask:{id}:{i} 按钮通道）。 */
+	/** 面板回答追问（支持点击快捷选项，或直接输入自由文本回答）。 */
 	app.post("/api/panel/asks/:id/answer", async (c) => {
-		const body = (await c.req.json().catch(() => ({}))) as { optionIndex?: number };
-		const r = await core.actions.onCardEvent(`ask:${c.req.param("id")}:${body.optionIndex ?? 0}`);
+		const userId = c.get("panelUser") as string;
+		const askId = c.req.param("id");
+		const row = await core.db.selectFrom("asks").where("id", "=", askId).selectAll().executeTakeFirst();
+		if (!row) return c.json({ error: "not_found" }, 404);
+		const ownerTask = await core.db.selectFrom("tasks").where("id", "=", row.task_id).where("user_id", "=", userId).selectAll().executeTakeFirst();
+		if (!ownerTask) return c.json({ error: "forbidden" }, 403);
+		const body = (await c.req.json().catch(() => ({}))) as { optionIndex?: number; text?: string };
+		if (body.text?.trim()) {
+			if (row.status !== "pending") return c.json({ handled: true, message: `${askId} 已回答过（幂等）` });
+			const answer = body.text.trim();
+			if (await core.handleBudgetAskAnswer(askId, answer)) {
+				return c.json({ handled: true, message: `${askId} 已处理（预算决定：${answer}）` });
+			}
+			await core.db.updateTable("asks").set({ status: "answered", answer }).where("id", "=", askId).execute();
+			await core.db.updateTable("users").set({ pending_interaction: null }).where("user_id", "=", userId).execute();
+			await core.db.updateTable("tasks").set({ stage: "working", updated_at: Date.now() }).where("id", "=", row.task_id).execute();
+			await core.wakeWorker({
+				taskId: row.task_id,
+				content: `【用户回答｜追问 ${askId}】\n${answer}`,
+				requestId: `ask:${askId}`,
+				entryKind: "weagent.followup",
+				data: { kind: "ask", ask_id: askId },
+				priority: "human",
+			});
+			return c.json({ handled: true, message: `${askId} 已提交回答` });
+		}
+		const r = await core.actions.onCardEvent(`ask:${askId}:${body.optionIndex ?? 0}`);
 		return c.json(r);
 	});
 

@@ -161,6 +161,17 @@ export interface WeAgentHost {
 		ctx: Context,
 	): Promise<{ observation: string; imageBase64?: string; details?: Record<string, unknown> }>;
 
+	/** 全局桌面互斥锁：保证同一时刻只有一个后台任务操作鼠标/键盘，防止多任务互抢焦点。 */
+	withDesktopLock<T>(taskId: number | null, fn: () => Promise<T>): Promise<T>;
+	/** 记录来自 MCP Computer Use 工具的截屏帧到任务轨迹（供 H5 时光机回放）。 */
+	recordMcpDesktopFrame(input: {
+		conversationId: ConversationId;
+		toolName: string;
+		args: Record<string, unknown>;
+		imageBase64?: string;
+		mimeType?: string;
+	}): Promise<void>;
+
 	/** 本地混合知识库检索（BM25 + 向量余弦 RRF 融合）。 */
 	kbSearch(query: string, topK: number): Promise<KbChunkHit[]>;
 	/** 读取指定知识库文档切片。 */

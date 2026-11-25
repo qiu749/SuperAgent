@@ -35,6 +35,7 @@
     "js-yaml": "^5.5.0",
     "kysely": "^0.28.0",
     "mem0ai": "3.3.1",
+    "open-computer-use": "^1.1.6",
     "pino": "^9.6.0",
     "playwright-core": "^1.65.0",
     "zod": "^3.24.2"

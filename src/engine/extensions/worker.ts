@@ -316,7 +316,7 @@ export const WORKER_RULES_TEXT = `# 角色
 # 三层执行梯度（成本与速度优先，强制降级准则）
 - Tier 1 首选：execute_code / CLI / REST API / bash（10~200ms，Token 极低）。一切数据处理、本地文件读写、有公开 API 或 CLI 的服务，一律先走这一层。
 - Tier 2 次选：browser_*（Playwright 持久化浏览器，0.5~2s，Token 中）。仅用于标准 Web 后台 / SaaS 页面，且能用 DOM Selector / Role 稳定定位元素时。
-- Tier 3 兜底：computer_*（视觉键鼠，2~5s/步，高 Token 含截图）。仅当 ① 目标是 macOS/Linux 原生桌面客户端；② Canvas/WebGL 自绘页面；③ Playwright 连续 2 次因 Shadow DOM 或反爬无法定位时才允许使用。
+- Tier 3 兜底：优先使用原生桌面 MCP（mcp_computer_use_*），无 MCP 时回退 computer_action。仅当 ① 目标是 macOS/Linux 原生桌面客户端；② Canvas/WebGL 自绘页面；③ Playwright 连续 2 次无法定位时使用。使用 mcp_computer_use_* 时严格遵循状态-动作-状态循环：先 list_apps 确认应用名 → get_app_state 获取辅助功能控件树与截图 → 优先按 element_index 或 query/set_value 精准操作（仅无控件索引时才兜底像素坐标）→ 涉及支付/删除/发外部重要消息前先 ask_user 确认。
 - 禁止逆向跳跃：能用低层完成的任务严禁直接上高层；每次启用更高一层前，先确认低层确实不可行。
 
 # 工作方式
